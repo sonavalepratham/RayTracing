@@ -5,7 +5,13 @@
 #include <vector>
 #include "geometry.h"
 
-struct Material {
+struct Light { // Light source
+    Light(const Vec3f &p, const float &i) : position(p), intensity(i) {}
+    Vec3f position; // position in space
+    float intensity; // intensity
+};
+
+struct Material { // body material, contains color
     Material(const Vec3f &color) : diffuse_color(color) {}
     Material() : diffuse_color() {}
     Vec3f diffuse_color;
@@ -20,6 +26,7 @@ struct Sphere { // 3D sphere
 
 /*
     returns true if intersecting else false.
+    t0 gives distance between origin to intersection.
 */
     bool ray_intersect(const Vec3f &orig, const Vec3f &dir, float &t0) const { // orig - from which ray is coming(camera), dir - direction of ray, t0 - distance between center and ray
         Vec3f L = center - orig; // vector on origin to center.
@@ -27,43 +34,56 @@ struct Sphere { // 3D sphere
         float d2 = L*L - tca*tca; // distance between center to direction intersection
         if (d2 > radius*radius) return false; // if distance between direction & center is greater than radius return false (not intersecting)
         float thc = sqrtf(radius*radius - d2); // circle edge to center-direction intersection distance.
-        t0       = tca - thc; 
+        t0       = tca - thc;  // t0 & t1 is distance between circle edge to origin.
         float t1 = tca + thc;
         if (t0 < 0) t0 = t1;
-        if (t0 < 0) return false;
+        if (t0 < 0) return false; // source is inside sphere
         return true;
     }
 };
 
+/*
+    returns true if ray intersect to any of sphere.
+    output variables:
+    hit: point where ray hit to sphere.
+    N: normal from center to hit.
+    material: material of intersecting sphere.
+*/
 bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, Vec3f &hit, Vec3f &N, Material &material) {
     float spheres_dist = std::numeric_limits<float>::max();
     for (size_t i=0; i < spheres.size(); i++) {
         float dist_i;
-        if (spheres[i].ray_intersect(orig, dir, dist_i) && dist_i < spheres_dist) {
+        if (spheres[i].ray_intersect(orig, dir, dist_i) && dist_i < spheres_dist) { // if distance is less than previous sphere intersection it means current sphere is near to camera
             spheres_dist = dist_i;
             hit = orig + dir*dist_i;
             N = (hit - spheres[i].center).normalize();
             material = spheres[i].material;
         }
     }
-    return spheres_dist!=std::numeric_limits<float>::max();
+    return spheres_dist!=std::numeric_limits<float>::max(); // it means ray intersect to any of the sphere.
 }
 
 /*
     return color based on intersect or not.
 */
 
-Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres) {
-    Vec3f point, N;
-    Material material;
+Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
+    Vec3f point, N; // point: intersection of ray on sphere. N: normal on sphere at intersection point.
+    Material material; // material of sphere.
     if (!scene_intersect(orig, dir, spheres, point, N, material)) {
-        return Vec3f(0.2, 0.7, 0.8); // background color
+        return Vec3f(0.2, 0.7, 0.8); // background color, if not intersect any of sphere.
     }
 
-    return material.diffuse_color;
+    float diffuse_light_intensity = 0;
+    for (size_t i=0; i<lights.size(); i++) {
+        Vec3f light_dir      = (lights[i].position - point).normalize();
+        diffuse_light_intensity  += lights[i].intensity * std::max(0.f, light_dir*N); // light intensity will be higher if N and light_dir are parallel.
+        // dot product of parallel vector is multiplication of magnitude, and perpendicular is 0.
+    }
+    return material.diffuse_color * diffuse_light_intensity;
 }
 
-void render(const std::vector<Sphere> &spheres) {
+void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
     const int width    = 1024;
     const int height   = 768;
     const int fov      = M_PI/2.;
@@ -75,7 +95,7 @@ void render(const std::vector<Sphere> &spheres) {
             float x =  (2*(i + 0.5)/(float)width  - 1)*tan(fov/2.)*width/(float)height; // x co ordinate with aspect ratio.
             float y = -(2*(j + 0.5)/(float)height - 1)*tan(fov/2.); // y co ordinate, negative sign applied as height is decreasing with increase of angle
             Vec3f dir = Vec3f(x, y, -1).normalize(); // z is -1 as frame is at 1 unit distance from camera & on opposite side(inside verticle plane).
-            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,0), dir, spheres); // cast ray and store background in frame buffer.
+            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,0), dir, spheres, lights); // cast ray and store background in frame buffer.
         }
     }
 
@@ -93,12 +113,18 @@ void render(const std::vector<Sphere> &spheres) {
 int main() {
     Material ivory(Vec3f(0.4, 0.4, 0.3));
     Material red_rubber(Vec3f(0.3, 0.1, 0.1));
+
     std::vector<Sphere> spheres;
+
     spheres.push_back(Sphere(Vec3f(-3,    0,   -16), 2,      ivory));
     spheres.push_back(Sphere(Vec3f(-1.0, -1.5, -12), 2, red_rubber));
     spheres.push_back(Sphere(Vec3f( 1.5, -0.5, -18), 3, red_rubber));
     spheres.push_back(Sphere(Vec3f( 7,    5,   -18), 4,      ivory));
-    render(spheres);
+    
+    std::vector<Light>  lights;
+    lights.push_back(Light(Vec3f(-20, 20,  20), 1.5));
+
+    render(spheres, lights);
 
     return 0;
 }
