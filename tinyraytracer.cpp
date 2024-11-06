@@ -12,10 +12,26 @@ struct Light { // Light source
 };
 
 struct Material { // body material, contains color
-    Material(const Vec3f &color) : diffuse_color(color) {}
-    Material() : diffuse_color() {}
+    Material(const Vec2f &a, const Vec3f &color, const float &spec) : albedo(a), diffuse_color(color), specular_exponent(spec) {}
+    Material() : albedo(1,0), diffuse_color(), specular_exponent() {}
+    // albedo is diffused reflectance or reflectivity. it's value is from 0 to 1.
+    Vec2f albedo; // array of 2 elements. 1st diffused albedo, 2nd specular albedo
+    //Light is scattered in many directions when it strikes a rough surface
     Vec3f diffuse_color;
+    // specular_exponent(shininess), infinite for mirror. 0 for diffused material.
+    float specular_exponent;
 };
+
+Vec3f reflect(const Vec3f &I, const Vec3f &N) { // I is incoming ray on surface(invert), N is normal on surface.
+/*
+
+returns reflection vector of Incident ray from surface in reverse direction.
+R+I = (2*N.I)*N
+R = (2*N.I)*N - I // reflection vector
+
+*/
+    return I - N*2.f*(I*N);
+}
 
 struct Sphere { // 3D sphere
     Vec3f center;
@@ -66,7 +82,6 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
 /*
     return color based on intersect or not.
 */
-
 Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
     Vec3f point, N; // point: intersection of ray on sphere. N: normal on sphere at intersection point.
     Material material; // material of sphere.
@@ -74,13 +89,14 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
         return Vec3f(0.2, 0.7, 0.8); // background color, if not intersect any of sphere.
     }
 
-    float diffuse_light_intensity = 0;
+    float diffuse_light_intensity = 0, specular_light_intensity = 0;
     for (size_t i=0; i<lights.size(); i++) {
         Vec3f light_dir      = (lights[i].position - point).normalize();
         diffuse_light_intensity  += lights[i].intensity * std::max(0.f, light_dir*N); // light intensity will be higher if N and light_dir are parallel.
+        specular_light_intensity += powf(std::max(0.f, -reflect(-light_dir, N)*dir), material.specular_exponent)*lights[i].intensity;
         // dot product of parallel vector is multiplication of magnitude, and perpendicular is 0.
     }
-    return material.diffuse_color * diffuse_light_intensity;
+    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + Vec3f(1., 1., 1.)*specular_light_intensity * material.albedo[1];
 }
 
 void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
@@ -103,6 +119,9 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
     ofs.open("./out.ppm", std::ofstream::out | std::ofstream::binary); // open in binary mode
     ofs << "P6\n" << width << " " << height << "\n255\n";
     for (size_t i = 0; i < height*width; ++i) {
+        Vec3f &c = framebuffer[i];
+        float max = std::max(c[0], std::max(c[1], c[2]));
+        if (max>1) c = c*(1./max);
         for (size_t j = 0; j<3; j++) {
             ofs << (char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j]))); // converting in range 0-255
         }
@@ -111,8 +130,8 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
 }
 
 int main() {
-    Material ivory(Vec3f(0.4, 0.4, 0.3));
-    Material red_rubber(Vec3f(0.3, 0.1, 0.1));
+    Material      ivory(Vec2f(0.6,  0.3), Vec3f(0.4, 0.4, 0.3),   50.);
+    Material red_rubber(Vec2f(0.9,  0.1), Vec3f(0.3, 0.1, 0.1),   10.);
 
     std::vector<Sphere> spheres;
 
@@ -123,6 +142,8 @@ int main() {
     
     std::vector<Light>  lights;
     lights.push_back(Light(Vec3f(-20, 20,  20), 1.5));
+    lights.push_back(Light(Vec3f( 30, 50, -25), 1.8));
+    lights.push_back(Light(Vec3f( 30, 20,  30), 1.7));
 
     render(spheres, lights);
 
